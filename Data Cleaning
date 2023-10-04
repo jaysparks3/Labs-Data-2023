@@ -1,0 +1,796 @@
+---
+title: "Pain level"
+author: "Jay Kim"
+date: "2023-09-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+ 
+## Rotator Cuffs 
+ 
+- 1 patient ( 2 applications)
+ 
+```{r}
+library(tidyverse)
+
+
+library(readxl)
+Rotator_Cuff_9_21_23 <- read_excel("G:/Shared drives/HMCSE-PAM Lab/DATA 202308/Regenative Labs/Rotator Cuff_9-21-23.xlsx", 
+    sheet = "Working Data Set", skip = 3)
+
+rotator <- Rotator_Cuff_9_21_23 %>% janitor::clean_names() %>% 
+    select(1:15,contains("nprs"), contains("total")) %>% 
+    arrange(new_patient_id)
+
+rotator_nprs <- rotator %>% select(contains("nprs")) %>% 
+    mutate_at(c(2:3), as.double)
+
+#Hmisc::describe(rotator)
+hist(rotator_nprs$nprs_day_30)
+glimpse(rotator_nprs)
+
+mm <- c("m","M")
+ff <- c("f", "F")
+rotator_final <- rotator %>% filter(!is.na(input_number)) %>% 
+    group_by(new_patient_id) %>% 
+    mutate(number_application = row_number()) %>% 
+    mutate(gender = ifelse(gender %in% mm, "M",
+                           ifelse(gender %in% ff, "F",   NA))) %>% 
+    mutate_at(c(6,7,15:35), as.double) # 48
+
+colnames(rotator_final)
+
+rotator_final[,c(5,6,7,8,20:35)] %>% 
+    mutate(total_stiffness_24 = as.numeric(total_stiffness_24), total_stiffness_70 = as.numeric(total_stiffness_70), total_stiffness_116=as.numeric(total_stiffness_116)) %>% 
+    tbl_summary(
+        
+        statistic = all_continuous() ~ "{mean} ({sd}) {min} {max}"
+        
+    ) %>%  add_n()
+
+rotator_final[,c(5,6,7,8,20:35)] %>% summarise(mean=mean(total_stiffness_116), SD = sd(total_stiffness_116), MIN=min(total_stiffness_116), MAX =max(total_stiffness_116)) 
+
+```
+### Descriptive Statistics
+
+```{r}
+
+library(gtsummary)
+
+desc_rotator_cuffs <- rotator_final[,c(5:8,15:35)] %>% select(-nprs_1, -nprs_2)  
+colnames(desc_rotator_cuffs) <- 
+    c("Gender","Age","BMI","Side","NPRS_initial","NPRS_day_30","NPRS_day_90",
+      "Pain_initial", "Stiffness_initial", "Function_initial", "WOMAC_initial", "QOLS_initial",
+      "Pain_day_30", "Stiffness_day_30", "Function_day_30", "WOMAC_day_30", "QOLS_day_30",
+      "Pain_day_90", "Stiffness_day_90", "Function_day_90", "WOMAC_day_90", "QOLS_day_90", "Applications")
+
+rotaotr_tsummary_tab <- desc_rotator_cuffs %>% select(1:7, contains("Pain"), contains("Stiffness"),contains("Function"),contains("WOMAC"),contains("QOLS"),Applications) %>% 
+    tbl_summary( 
+  statistic = all_continuous() ~ "{mean} ({sd}) {min} {max}",
+
+  ) %>%  add_n() %>%  bold_labels()
+
+rotaotr_tsummary_tab
+ 
+
+```
+
+### Plot - box plot
+
+```{r}
+
+rotator_long <- desc_rotator_cuffs %>% select(contains("womac")) %>% 
+    pivot_longer(c(1:3), names_to = "interval", values_to = "WOMAC_scores")  #144
+
+ggplot(rotator_long,
+       aes(x = interval, y = WOMAC_scores, color = interval)) +
+    geom_boxplot(outlier.color = "black") +
+    geom_jitter(size = 1.5, width = 0.3)+
+    stat_summary( fun ="mean", color = "red", shape = 8)
+    
+
+
+
+
+
+```
+### Outliers
+
+```{r}
+
+#outliers
+ 
+outliers_30 <- c( mean(desc_rotator_cuffs$WOMAC_day_30, na.rm=T)-2.5*sd(desc_rotator_cuffs$WOMAC_day_30, na.rm=T),
+               mean(desc_rotator_cuffs$WOMAC_day_30, na.rm=T)+2.5*sd(desc_rotator_cuffs$WOMAC_day_30, na.rm=T))
+outliers_90 <- c( mean(desc_rotator_cuffs$WOMAC_day_90, na.rm=T)-2.5*sd(desc_rotator_cuffs$WOMAC_day_90, na.rm=T),
+               mean(desc_rotator_cuffs$WOMAC_day_90, na.rm=T)+2.5*sd(desc_rotator_cuffs$WOMAC_day_90, na.rm=T))
+outliers_inital <- c( mean(desc_rotator_cuffs$WOMAC_initial, na.rm=T)-2.5*sd(desc_rotator_cuffs$WOMAC_initial, na.rm=T),
+               mean(desc_rotator_cuffs$WOMAC_initial, na.rm=T)+2.5*sd(desc_rotator_cuffs$WOMAC_initial, na.rm=T))
+outliers_inital
+outliers_30
+outliers_90
+```
+
+
+### ANOVA
+
+- Are there significant differences in the mean values of the scales between follow-up intervals? If so,
+are they interval specific?
+
+
+```{r nprs}
+
+nprs <- rotator_final %>% select(nprs_initial, nprs_day_30, nprs_day_90) %>% 
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "nprs_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "nprs_initial"))
+colSums(is.na(nprs))
+
+nprs
+set.seed(111)
+summary(lm_nprs <- lm(nprs_scors ~ intervals, data = nprs))
+
+set.seed(222)
+summary(aov.nprs <- aov(nprs_scors ~ intervals, data = nprs))
+aov.nprs$coefficients
+
+# comparisons
+TukeyHSD(aov.nprs)
+
+
+
+```
+
+```{r pain womac}
+
+womac_pain <- rotator_final %>% select(total_pain_initial= total_pain_21, total_pain_day_30 =total_pain, total_pain_day_90=total_pain_113) %>% 
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "total_pain_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_pain_initial"))
+colSums(is.na(womac_pain))
+
+womac_pain
+set.seed(111)
+summary(lm_womac_pain <- lm(total_pain_scors ~ intervals, data = womac_pain))
+
+set.seed(222)
+summary(aov.womac_pain <- aov(total_pain_scors ~ intervals, data = womac_pain))
+
+# comparisons
+TukeyHSD(aov.womac_pain)
+
+```
+
+```{r stiffness womac}
+
+womac_stiffness  <- rotator_final %>% select(total_stiffness_initial= total_stiffness_24, total_stiffness_day_30 =total_stiffness_70, total_stiffness_day_90=total_stiffness_116) %>% 
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "total_stiffness_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_stiffness_initial"))
+colSums(is.na(womac_stiffness))
+
+womac_stiffness
+set.seed(111)
+summary(lm_womac_stiffness <- lm(total_stiffness_scors ~ intervals, data = womac_stiffness))
+
+set.seed(222)
+summary(aov.womac_stiffness <- aov(total_stiffness_scors ~ intervals, data = womac_stiffness))
+#aov.womac_stiffness$coefficients
+
+# comparisons
+TukeyHSD(aov.womac_stiffness)
+
+```
+
+```{r function womac}
+
+womac_function  <- rotator_final %>% select(total_function_initial= total_function, total_function_day_30 =total_function_87, total_function_day_90=total_function_133) %>% 
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "total_stiffness_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_function_initial"))
+colSums(is.na(womac_stiffness))
+
+womac_function
+set.seed(111)
+summary(lm_womac_function <- lm(total_stiffness_scors ~ intervals, data = womac_function))
+
+set.seed(222)
+summary(aov.womac_function <- aov(total_stiffness_scors ~ intervals, data = womac_function))
+#aov.womac_function$coefficients
+
+# comparisons
+TukeyHSD(aov.womac_function)
+
+
+```
+
+
+```{r womac}
+
+
+
+womac <- rotator_final %>% select(total_womac_initial= total_womac_42, total_womac_day_30 =total_womac_88, total_womac_day_90=total_womac_134) %>% 
+    filter(total_womac_initial < 91 & total_womac_day_30 < 81.65 & total_womac_day_90 < 76.5) %>% 
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "total_womac_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_womac_initial")) #135
+
+colSums(is.na(womac))
+
+ ##
+set.seed(111)
+summary(lm_womac <- lm(total_womac_scors ~ intervals, data = womac))
+
+set.seed(222)
+summary(aov.womac <- aov(total_womac_scors ~ intervals, data = womac))
+#aov.womac$coefficients
+
+# comparisons
+TukeyHSD(aov.womac)
+
+```
+
+```{r qols}
+
+
+qols <- rotator_final %>% select(total_qols_initial= total_qols_59, total_qols_day_30 =total_qols_105, total_qols_day_90=total_qols_151) %>% 
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "total_qols_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_qols_initial"))
+colSums(is.na(qols))
+
+qols
+set.seed(111)
+summary(lm_qols <- lm(total_qols_scors ~ intervals, data = qols))
+
+set.seed(222)
+summary(aov.qols <- aov(total_qols_scors ~ intervals, data = qols))
+#aov.qols$coefficients
+
+# comparisons
+TukeyHSD(aov.qols)
+
+
+```
+
+## MCID
+
+```{r mcid data}
+
+mcid_df_all <- rotator_final %>% 
+    select(nprs_1, nprs_2, total_womac_42, total_qols_59, total_womac_134, total_qols_151) %>% 
+     filter(total_womac_42 < 91 &  total_womac_134 < 76.5) %>%
+    filter(!is.na(nprs_1)) %>% 
+    mutate(pain_lvl = cut(nprs_1, breaks = c(0,3,4,5,6,7,8,10), labels = FALSE))
+colSums(is.na(mcid_df_all))
+
+
+table(mcid_df_all$nprs_1, mcid_df_all$pain_lvl)
+library(gtsummary)
+mcid_df_all[,c(2:8)] %>% 
+tbl_summary(
+     statistic = all_continuous() ~ "{mean} ({sd}) {min} {max}",
+
+  ) %>%  add_n() %>%  bold_labels()
+ 
+
+
+```
+
+    
+```{r mcid womac}
+
+#mcid_df <- mcid_df_all[,-1] %>% select(nprs_1, total_womac_42,total_womac_134)
+shapiro.test(mcid_df_all$total_qols_151)
+# data:  mcid_df_all$total_womac_42
+# W = 0.96564, p-value = 0.3351
+shapiro.test(mcid_df_all$total_womac_134)  
+# data:  mcid_df_all$total_womac_134
+# W = 0.94066, p-value = 0.05862
+hist(mcid_df_all$total_qols_151)
+
+# data table
+mcid_df <- mcid_df_all %>% group_by(pain_lvl) %>% 
+    summarise(N=n(),diff=total_womac_134-total_womac_42, sd_90 = sd(total_womac_134), RS = mean(diff)) %>% filter(!duplicated(pain_lvl))  %>% select(-diff)
+# all
+mcid_df_N <- data.frame(pain_lvl = "All", N = sum(3+6+6+5+9+5+4),  sd_90 = sd(mcid_df_all$total_womac_134, na.rm=T), RS = mean(mcid_df_all$total_womac_134 - mcid_df_all$total_womac_42)  )
+#RS and ES
+RS_bis <- sum(mcid_df$RS*mcid_df$N)/sum(mcid_df$N)
+RS =c(RS_bis, mcid_df$RS)
+ES = c(RS_bis/sd(mcid_df_all$total_womac_134, na.rm=T), mcid_df$RS/mcid_df$sd_90)
+mcid_df2 <- rbind(mcid_df_N, mcid_df)  %>% cbind(ES)
+
+mcid_diff <- mcid_df_all %>% group_by(pain_lvl) %>% 
+    summarise(diff=total_womac_134-total_womac_42)
+
+#CI
+#if data is normal distribution (use t-test)
+IC_1=c(
+    t.test(mcid_diff[mcid_diff$pain_lvl==1,"diff"], conf.level=0.95)$conf.int, 
+       t.test(mcid_diff[mcid_diff$pain_lvl==2,"diff"], conf.level=0.95)$conf.int, 
+       t.test(mcid_diff[mcid_diff$pain_lvl==3,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==4,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==5,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==6,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==7,"diff"], conf.level=0.95)$conf.int)
+
+IC=round(IC_1,4)
+
+LCI=c(" ",IC[c(1,3,5,7,9,11,13)])
+UCI=c(" ", IC[c(2,4,6,8,10,12,14)])
+t_test_p <- c(t.test(mcid_df_all$total_womac_134 , mcid_df_all$total_womac_42)$p.value,
+    t.test(mcid_diff[mcid_diff$pain_lvl==1,"diff"], conf.level=0.95)$p.value, 
+       t.test(mcid_diff[mcid_diff$pain_lvl==2,"diff"], conf.level=0.95)$p.value, 
+       t.test(mcid_diff[mcid_diff$pain_lvl==3,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==4,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==5,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==6,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==7,"diff"], conf.level=0.95)$p.value)
+t_test_pp=round(t_test_p,4)
+
+
+mcid_split= split(mcid_df_all, mcid_df_all$pain_lvl)
+#wilcox (if the data is not normal used this test) p-value
+p_value =c(wilcox.test(mcid_df_all$total_womac_134 , mcid_df_all$total_womac_42)$p.value, 
+    wilcox.test(mcid_split$'1'$total_womac_134 , mcid_split$'1'$total_womac_42)$p.value, 
+           wilcox.test(mcid_split$'2'$total_womac_134 , mcid_split$'2'$total_womac_42)$p.value,  
+wilcox.test(mcid_split$'3'$total_womac_134 , mcid_split$'3'$total_womac_42)$p.value, 
+wilcox.test(mcid_split$'4'$total_womac_134 , mcid_split$'4'$total_womac_42)$p.value, 
+wilcox.test(mcid_split$'5'$total_womac_134 , mcid_split$'5'$total_womac_42)$p.value, 
+wilcox.test(mcid_split$'6'$total_womac_134 , mcid_split$'6'$total_womac_42)$p.value,
+wilcox.test(mcid_split$'7'$total_womac_134 , mcid_split$'7'$total_womac_42)$p.value)
+
+wr <- wilcox.test(mcid_split$'7'$total_womac_134 , mcid_split$'7'$total_womac_42)$p.value
+ 
+MCID_WOMAC_TOTAL_RESUTLS <- data.frame(mcid_df2,LCI, UCI,t_test_pp)
+MCID_WOMAC_TOTAL_RESUTLS
+
+ttest <- t.test(mcid_diff[mcid_diff$pain_lvl==1,"diff"], conf.level=0.95)$conf.int 
+ttest$p.value
+t.test(mcid_diff$diff,conf.level=0.95)$conf.int 
+round(t.test(mcid_diff$diff,conf.level=0.95)$p.value ,5)
+write.csv(MCID_WOMAC_TOTAL_RESUTLS, "G:/Shared drives/HMCSE-PAM Lab/Jay's Space/2023 Active Projects/08/Regenative Labs/MCID_WOMAC_TOTAL_RESUTLS.csv", row.names = FALSE)
+
+
+ 
+```
+```{r mcid qols}
+
+# data table
+mcid_df <- mcid_df_all %>% group_by(pain_lvl) %>% 
+    summarise(N=n(),diff=total_qols_151-total_qols_59, sd_90 = sd(total_qols_151), RS = mean(diff)) %>% filter(!duplicated(pain_lvl))  %>% select(-diff)
+# all
+mcid_df_N <- data.frame(pain_lvl = "All", N = sum(3+6+6+5+9+5+4),  sd_90 = sd(mcid_df_all$total_qols_151, na.rm=T), RS = mean(mcid_df_all$total_qols_151 - mcid_df_all$total_qols_59)  )
+#RS and ES
+RS_bis <- sum(mcid_df$RS*mcid_df$N)/sum(mcid_df$N)
+RS =c(RS_bis, mcid_df$RS)
+ES = c(RS_bis/sd(mcid_df_all$total_qols_151, na.rm=T), mcid_df$RS/mcid_df$sd_90)
+mcid_df2 <- rbind(mcid_df_N, mcid_df)  %>% cbind(ES)
+
+mcid_diff <- mcid_df_all %>% group_by(pain_lvl) %>% 
+    summarise(diff=total_qols_151-total_qols_59)
+
+#CI
+#if data is normal distribution (use t-test)
+IC_1=c(
+    t.test(mcid_diff[mcid_diff$pain_lvl==1,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==2,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==3,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==4,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==5,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==6,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==7,"diff"], conf.level=0.95)$conf.int)
+
+IC=round(IC_1,4)
+
+LCI=c(" ",IC[c(1,3,5,7,9,11,13)])
+UCI=c(" ", IC[c(2,4,6,8,10,12,14)])
+t_test_p <- c(t.test(mcid_df_all$total_qols_151 , mcid_df_all$total_qols_59)$p.value,
+    t.test(mcid_diff[mcid_diff$pain_lvl==1,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==2,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==3,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==4,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==5,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==6,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==7,"diff"], conf.level=0.95)$p.value)
+t_test_pp=round(t_test_p,4)
+
+# 
+# mcid_split= split(mcid_df_all, mcid_df_all$pain_lvl)
+# #wilcox (if the data is not normal used this test) p-value
+# p_value =c(wilcox.test(mcid_df_all$total_womac_134 , mcid_df_all$total_womac_42)$p.value,
+#     wilcox.test(mcid_split$'1'$total_womac_134 , mcid_split$'1'$total_womac_42)$p.value,
+#            wilcox.test(mcid_split$'2'$total_womac_134 , mcid_split$'2'$total_womac_42)$p.value,
+# wilcox.test(mcid_split$'3'$total_womac_134 , mcid_split$'3'$total_womac_42)$p.value,
+# wilcox.test(mcid_split$'4'$total_womac_134 , mcid_split$'4'$total_womac_42)$p.value,
+# wilcox.test(mcid_split$'5'$total_womac_134 , mcid_split$'5'$total_womac_42)$p.value,
+# wilcox.test(mcid_split$'6'$total_womac_134 , mcid_split$'6'$total_womac_42)$p.value,
+# wilcox.test(mcid_split$'7'$total_womac_134 , mcid_split$'7'$total_womac_42)$p.value)
+# 
+# wr <- wilcox.test(mcid_split$'7'$total_womac_134 , mcid_split$'7'$total_womac_42)$p.value
+
+MCID_QOLS_TOTAL_RESUTLS <- data.frame(mcid_df2,LCI, UCI,t_test_pp)
+MCID_QOLS_TOTAL_RESUTLS
+ 
+t.test(mcid_diff$diff,conf.level=0.95)$conf.int 
+round(t.test(mcid_diff$diff,conf.level=0.95)$p.value ,5)
+write.csv(MCID_QOLS_TOTAL_RESUTLS, "G:/Shared drives/HMCSE-PAM Lab/Jay's Space/2023 Active Projects/08/Regenative Labs/MCID_QOLS_TOTAL_RESUTLS.csv", row.names = FALSE)
+wtest <- wilcox.test(mcid_df_all$total_womac_134 , mcid_df_all$total_womac_42)
+ 
+wtest$p.value
+
+
+```
+
+
+```{r rotator cuff demo}
+
+rotator_final2 <- rotator_final %>% select(total_womac_initial= total_womac_42, total_womac_day_30 =total_womac_88, total_womac_day_90=total_womac_134, gender, age, bmi,side)  %>% filter(total_womac_day_90 > 0 & total_womac_initial> 0) %>% 
+    mutate(diff_womac0_90 =   (total_womac_day_90- total_womac_initial)) %>% 
+    mutate(age_g = cut(age, breaks = c( 64,70, 89))) %>% 
+    mutate(bmi_g = cut(bmi, breaks = c(20,24.9,29.9,39) )) # based on STAT
+ table(rotator_final2$bmi_g)
+set.seed(12345)
+summary(m1 <- lm(diff_womac0_90 ~  gender+age_g+bmi_g, data = rotator_final2))
+summary(aov_demo <- aov(diff_womac0_90 ~  gender+age_g+bmi_g, data = rotator_final2))
+TukeyHSD(aov_demo)
+
+hist(rotator_final2$diff_womac0_90)
+table(rotator_final2$bmi)
+rotator_final2[, c(9,10,11)] %>%  tbl_summary(
+    by =age_g,
+     statistic = all_continuous() ~ "{mean} ({sd}) {min} {max}",
+
+  ) %>%  add_n() %>%  bold_labels()
+
+
+rotator_final2 %>% group_by(age_g) %>% summarise(meaninitialWOMAC=mean(total_womac_initial, na.rm=T), meanWOMACDIFF = mean(diff_womac0_90,, na.rm=T), N=n())
+rotator_final2 %>% group_by(bmi_g) %>% summarise(meaninitialWOMAC=mean(total_womac_initial, na.rm=T),meanWOMACDIFF = mean(diff_womac0_90,, na.rm=T), N=n())
+rotator_final2 %>% group_by(gender) %>% summarise(meaninitialWOMAC=mean(total_womac_initial, na.rm=T),meanWOMACDIFF = mean(diff_womac0_90,, na.rm=T), N=n())
+
+
+
+```
+### Saving the Rotator Cuffs
+
+```{r}
+
+
+
+
+
+```
+
+
+
+
+## Hips
+
+```{r hips}
+Hips_9_21_23 <- read_excel("G:/Shared drives/HMCSE-PAM Lab/DATA 202308/Regenative Labs/Hips_9-21-23.xlsx", 
+      sheet = "Working Data", col_types = c("text", 
+          "numeric", "text", "text", "text", 
+          "numeric", "text", "text", "text", 
+          "text", "text", "text", "text", "text", 
+          "text", "date", "text", "text", "text", 
+          "text", "text", "text", "numeric", 
+          "text", "text", "numeric", "text", 
+         "text", "text", "text", "text", "text", 
+          "text", "text", "text", "text", "text", 
+         "text", "text", "text", "text", "numeric", 
+         "numeric", "numeric", "text", "text", 
+          "text", "text", "text", "text", "text", 
+          "text", "text", "text", "text", "text", 
+          "text", "text", "text", "text", "numeric", 
+          "text", "text", "text", "text", "text", 
+          "text", "text", "numeric", "text", 
+          "text", "numeric", "text", "text", 
+          "text", "text", "text", "text", "text", 
+          "text", "text", "text", "text", "text", 
+          "text", "text", "text", "text", "numeric", 
+          "numeric", "text", "text", "text", 
+          "text", "text", "text", "text", "text", 
+          "text", "text", "text", "text", "text", 
+         "text", "text", "text", "numeric", 
+          "text", "text", "text", "text", "text", 
+          "text", "text", "numeric", "text", 
+          "numeric", "numeric", "text", "text", 
+          "text", "text", "text", "numeric", 
+         "text", "text", "text", "text", "text", 
+         "text", "text", "text", "text", "text", 
+          "numeric", "numeric", "text", "text", 
+         "text", "text", "text", "text", "text", 
+          "text", "text", "text", "text", "text", 
+          "text", "text", "text", "text", "numeric", 
+          "text", "numeric", "numeric", "numeric", 
+         "numeric", "numeric", "numeric", 
+          "numeric", "numeric", "numeric", 
+          "numeric", "numeric", "numeric", 
+          "numeric", "numeric", "numeric"), 
+      skip = 3)
+
+cols_total <- c("nprs_initial")
+
+hips_df1 <- Hips_9_21_23 %>% janitor::clean_names() %>% filter(!is.na(input_number )) %>% 
+     filter(!is.na(patient_id_on_django)) %>% mutate_at(c(17:61, 63:107,109:153), as.double) %>% 
+    mutate(total_pain_initial = rowSums(across(18:22))) %>% 
+    mutate(total_pain_day_30 = rowSums(across(64:68))) %>% 
+    mutate(total_pain_day_90 = rowSums(across(110:114))) %>% 
+    mutate(total_stiffness_initial = rowSums(across(24:25))) %>% 
+    mutate(total_stiffness_day_30  = rowSums(across(70:71))) %>% 
+    mutate(total_stiffness_day_90 = rowSums(across(116:117)))%>% 
+    mutate(total_function_initial = rowSums(across(27:42))) %>% 
+    mutate(total_function_day_30 = rowSums(across(73:88))) %>% 
+    mutate(total_function_day_90 = rowSums(across(119:134)))  %>% 
+    select(1:17,  contains("nprs"), contains("womac"), contains("qols"), contains("initial"), contains("_30"), contains("_90"))
+
+hips_df2 <- hips_df1 %>% 
+    group_by(new_patient_id) %>% mutate(applications = row_number()) %>% 
+    select(-20,-21,-25,-26,-30,-31) %>% 
+    select(gender, age, bmi, side,contains("nprs"),contains("pain"),contains("stiffness"), contains("function"),
+           contains("womac"), contains("qols") ) %>% 
+    mutate(gender = toupper(gender))  
+
+hips_df2[,c(2:25)] %>% select(-contains("nprs")) %>% 
+    mutate(bmi = as.numeric(bmi)) %>% 
+   tbl_summary(
+     statistic = all_continuous() ~ "{mean} ({sd}) {min} {max}",
+  ) %>%  add_n() %>%  bold_labels()
+
+hips_df2[,c(12:15)] %>% na.omit() %>% 
+    summarise(mean=mean(total_stiffness_day_30), SD = sd(total_stiffness_day_30), MIN=min(total_stiffness_day_30), MAX =max(total_stiffness_day_30), N=n()) 
+
+
+ 
+
+```
+
+
+```{r number of applications}
+
+hips_df3 <- hips_df2 %>%
+      group_by(new_patient_id) %>% mutate(max_app = max(applications)) %>% 
+    mutate(max_app2 =  ifelse(max_app >= 2 , "2+", "1")) 
+
+
+  hips_df3_add <-  hips_df3 %>%    select(new_patient_id, contains("womac")) %>% 
+      summarise(total_womac_initial = mean(total_womac), total_womacn_day_30 = mean(total_womac_90),
+                total_womac_day_90 = mean(total_womac_136)) %>% na.omit() %>% 
+       pivot_longer(c(2:4), names_to = "intervals", values_to = "womac_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_womac_initial"))
+
+  
+  hips_df3_add_app <- hips_df3_add %>% 
+     left_join(hips_df3, by ="new_patient_id")  
+  
+  
+hips_app2 <-   hips_df3 %>%    select(new_patient_id, contains("womac")) %>% 
+      summarise(total_womac_initial = mean(total_womac), total_womacn_day_30 = mean(total_womac_90),
+                total_womac_day_90 = mean(total_womac_136)) %>% na.omit() %>% 
+    left_join(hips_df3[,c(1,26,27)], by ="new_patient_id") %>% 
+    mutate(diff = total_womac_day_90 - total_womac_initial) %>% mutate(max_app = as.factor(max_app))
+  
+  
+   
+set.seed(111)
+summary(lm <- lm(diff ~   max_app , data = hips_app2))
+
+set.seed(222)
+summary(aov <- aov(diff ~   max_app , data = hips_app2))
+set.seed(222)
+summary(aov2 <- aov(diff ~   max_app2 , data = hips_app2))
+
+#comparisons
+app_com <- TukeyHSD(aov)
+app_com2 <- TukeyHSD(aov2)
+
+app_com2
+app_com
+# average
+
+mean_womac_id  <-  hips_df3 %>% group_by(new_patient_id,max_app) %>% summarise(meanWomac = mean(total_womac_136, na.rm=T), Min=min(total_womac_136, na.rm=T), Max =max(total_womac_136, na.rm=T)) %>% 
+    mutate(change = Max-Min)
+mean_womac_id
+app_hips <- rbind(app_com2$max_app2, app_com$max_app)
+
+write.csv(app_hips, "G:/Shared drives/HMCSE-PAM Lab/Jay's Space/2023 Active Projects/08/Regenative Labs 2023/hips_tukeys_app_number.csv" )
+
+
+```
+
+
+
+```{r  anova tukey's test for hips}
+
+## - average of scale for multiple applications patients
+
+### Pain
+hips_df2_long <- hips_df2 %>%
+      group_by(new_patient_id) %>% 
+      select(new_patient_id, contains("pain")) %>% 
+      summarise(total_pain_initial = mean(total_pain_initial), total_pain_day_30 = mean(total_pain_day_30),
+                total_pain_day_90 = mean(total_pain_day_90)) %>% na.omit() %>% # removed any nas (47 used)
+      pivot_longer(c(2:4), names_to = "intervals", values_to = "pain_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_pain_initial"))
+set.seed(111)
+summary(lm <- lm(pain_scors ~ intervals , data = hips_df2_long))
+set.seed(222)
+summary(aov <- aov(pain_scors ~ intervals , data = hips_df2_long))
+#comparisons
+hips_pain <- TukeyHSD(aov)
+
+### stiffness
+hips_df2_long <- hips_df2 %>% 
+      group_by(new_patient_id) %>% 
+      select(new_patient_id, contains("stiffness")) %>% 
+      summarise(total_stiffness_initial = mean(total_stiffness_initial), total_stiffness_day_30 = mean(total_stiffness_day_30),
+                total_stiffness_day_90 = mean(total_stiffness_day_90)) %>% na.omit() %>% #63
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "stiffness_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_stiffness_initial"))
+set.seed(111)
+summary(lm <- lm(stiffness_scors ~ intervals, data = hips_df2_long))
+set.seed(222)
+summary(aov <- aov(stiffness_scors ~ intervals, data = hips_df2_long))
+#comparisons
+TukeyHSD(aov)
+hips_stiffness <- TukeyHSD(aov)
+
+### function
+hips_df2_long <- hips_df2 %>%  
+    group_by(new_patient_id) %>% 
+      select(new_patient_id, contains("function")) %>% 
+      summarise(total_function_initial = mean(total_function_initial), total_function_day_30 = mean(total_function_day_30),
+                total_function_day_90 = mean(total_function_day_90)) %>% na.omit() %>% # 40 used
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "function_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_function_initial"))
+set.seed(111)
+summary(lm <- lm(function_scors ~ intervals, data = hips_df2_long))
+set.seed(222)
+summary(aov <- aov(function_scors ~ intervals, data = hips_df2_long))
+#comparisons
+TukeyHSD(aov)
+hips_function <- TukeyHSD(aov)
+
+### total womac
+hips_df2_long <- hips_df2 %>%  
+    group_by(new_patient_id) %>% 
+      select(new_patient_id, contains("womac")) %>% 
+      summarise(total_womac_initial = mean(total_womac), total_womacn_day_30 = mean(total_womac_90),
+                total_womac_day_90 = mean(total_womac_136)) %>% na.omit() %>% # 67 used
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "womac_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_womac_initial"))
+
+set.seed(111)
+summary(lm <- lm(womac_scors ~ intervals, data = hips_df2_long))
+set.seed(222)
+summary(aov <- aov(womac_scors ~ intervals, data = hips_df2_long))
+#comparisons
+TukeyHSD(aov)
+hips_womac <- TukeyHSD(aov)
+
+
+
+### qols
+hips_df2_long <- hips_df2 %>% 
+    select(contains("qols")) %>% 
+ select(1,total_qols_initial=total_qols_61 , total_qols_day_30=total_qols_107, total_qols_day_90=total_qols_153) %>% 
+    group_by(new_patient_id) %>% 
+    summarise(total_qols_initial = mean(total_qols_initial), total_qols_day_30 = mean(total_qols_day_30),
+                total_qols_day_90 = mean(total_qols_day_90)) %>% na.omit() %>% # 67 used
+    pivot_longer(c(2:4), names_to = "intervals", values_to = "qols_scors") %>% 
+    mutate(intervals = as.factor(intervals)) %>% mutate(intervals = relevel(intervals, ref = "total_qols_initial"))
+
+set.seed(111)
+summary(lm <- lm(qols_scors ~ intervals, data = hips_df2_long))
+set.seed(222)
+summary(aov <- aov(qols_scors ~ intervals, data = hips_df2_long))
+#comparisons
+TukeyHSD(aov)
+hips_qols <- TukeyHSD(aov)
+
+### demo
+hips_df2_final2 <- hips_df2 %>% 
+    select(new_patient_id,total_womac_initial= total_womac,  total_womac_day_90=total_womac_136, gender, age, bmi)  %>% 
+    group_by(new_patient_id) %>% mutate(total_womac_initial = mean(total_womac_initial, na.rm=T), total_womac_day_90= mean(total_womac_day_90, na.rm=T)) %>% 
+    mutate(diff_womac0_90 =   (total_womac_day_90- total_womac_initial)) %>%
+    mutate(bmi = as.double(bmi)) %>% 
+    mutate(age_g = cut(age, breaks = c( 64,70, 81,93))) %>% 
+    mutate(bmi_g = cut(bmi, breaks = c(20,24.9,29.9,39) )) # based on STAT
+ 
+table(hips_df2_final2$bmi_g)
+ 
+set.seed(12345)
+summary(m1 <- lm(diff_womac0_90 ~  gender+age_g+bmi_g, data = hips_df2_final2))
+summary(aov_demo <- aov(diff_womac0_90 ~  gender+age_g+bmi_g, data = hips_df2_final2))
+hips_demo <- TukeyHSD(aov_demo)
+hips_demo$gender
+m1$model
+### SAVE ALL Tukey's test
+
+hips_tukeys <- rbind(app_hips, hips_pain$intervals, hips_stiffness$intervals, hips_function$intervals, hips_womac$intervals,  hips_qols$intervals,hips_demo$gender,hips_demo$age_g,hips_demo$bmi_g )
+
+hips_tukeys
+```
+
+# MCID - stop here
+
+```{r}
+
+### MCID
+hips_mcid <- hips_df2 %>% 
+    select(nprs_initial, total_womac_initial=total_womac, total_womac_day_90=total_womac_136 ) %>% 
+     filter(!is.na(nprs_initial)) %>% 
+    mutate(pain_lvl = cut(nprs_initial, breaks = c(0,2,3,4,5,6,7,8,10), labels = FALSE)) %>% 
+    mutate(diff = total_womac_day_90 - total_womac_initial) %>% filter(!is.na(diff))
+
+table(hips_mcid$pain_lvl)
+
+# mcid with effect of RS
+hips_mcid_effect <- hips_mcid %>% group_by(pain_lvl) %>% 
+    summarise(mean_diff = mean(diff), MCID_SD = sd(diff)) 
+
+
+hips_mcid_effect
+
+```
+
+
+
+
+# ES
+
+```{r mcid hips}
+
+# normality test
+shapiro.test(hips_mcid$total_womac_day_90)
+hist(hips_mcid$total_womac_day_90)
+
+# data table
+mcid_df <- hips_mcid %>% group_by(pain_lvl) %>% 
+    summarise(N=n(),diff=total_womac_day_90-total_womac_initial, 
+              sd_90 = sd(total_womac_day_90, na.rm=T), RS = mean(diff, na.rm=T)) %>% filter(!duplicated(pain_lvl))  %>% select(-diff)
+# all
+mcid_df_N <- data.frame(pain_lvl = "All", N = sum(7+12+13+11+9+18+10+8),  sd_90 = sd(hips_mcid$total_womac_day_90, na.rm=T), RS = mean(hips_mcid$total_womac_day_90 - hips_mcid$total_womac_initial, na.rm=T)  )
+#RS and ES
+RS_bis <- sum(mcid_df$RS*mcid_df$N)/sum(mcid_df$N)
+RS =c(RS_bis, mcid_df$RS)
+ES = c(RS_bis/sd(hips_mcid$total_womac_day_90, na.rm=T), mcid_df$RS/mcid_df$sd_90)
+mcid_df2 <- rbind(mcid_df_N, mcid_df)  %>% cbind(ES)
+
+mcid_diff <- hips_mcid %>% group_by(pain_lvl) %>% 
+    summarise(diff=total_womac_day_90-total_womac_initial)
+
+#CI
+#if data is normal distribution (use t-test)
+IC_1=c(
+    t.test(mcid_diff[mcid_diff$pain_lvl==1,"diff"], conf.level=0.95)$conf.int, 
+       t.test(mcid_diff[mcid_diff$pain_lvl==2,"diff"], conf.level=0.95)$conf.int, 
+       t.test(mcid_diff[mcid_diff$pain_lvl==3,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==4,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==5,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==6,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==7,"diff"], conf.level=0.95)$conf.int,
+       t.test(mcid_diff[mcid_diff$pain_lvl==8,"diff"], conf.level=0.95)$conf.int)
+
+IC=round(IC_1,4)
+t.test(hips_mcid$total_womac_day_90 , hips_mcid$total_womac_initial,conf.level=0.95)$conf.int
+LCI=c("-14.26700",IC[c(1,3,5,7,9,11,13,15)])
+UCI=c("-2.97438", IC[c(2,4,6,8,10,12,14,16)])
+t_test_p <- c(t.test(hips_mcid$total_womac_day_90 , hips_mcid$total_womac_initial)$p.value,
+    t.test(mcid_diff[mcid_diff$pain_lvl==1,"diff"], conf.level=0.95)$p.value, 
+       t.test(mcid_diff[mcid_diff$pain_lvl==2,"diff"], conf.level=0.95)$p.value, 
+       t.test(mcid_diff[mcid_diff$pain_lvl==3,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==4,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==5,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==6,"diff"], conf.level=0.95)$p.value,
+       t.test(mcid_diff[mcid_diff$pain_lvl==7,"diff"], conf.level=0.95)$p.value,
+     t.test(mcid_diff[mcid_diff$pain_lvl==8,"diff"], conf.level=0.95)$p.value)
+p_value=round(t_test_p,4)
+ 
+ 
+HIPS_MCID_WOMAC_TOTAL_RESUTLS <- data.frame(mcid_df2,LCI, UCI,p_value )
+HIPS_MCID_WOMAC_TOTAL_RESUTLS %>% merge(hips_mcid_effect[,c(1,3)], by = "pain_lvl")
+
+
+
+
+
+```
+
